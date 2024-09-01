@@ -5,14 +5,23 @@ import bcrypt from "bcrypt";
 import cors from "cors";
 import express from "express";
 import jwt from "jsonwebtoken";
-
+import fileupload from "express-fileupload";
+import cloudinary from "cloudinary";
 //dotenv configuration:
 dotenv.config();
+//cloudinary configuration:
+
+cloudinary.v2.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 //creating exprtess app:
 const app = express();
 //Using middlewares:
 app.use(cors());
 app.use(express.json());
+app.use(fileupload({ useTempFiles: true }));
 //Connecting to database:
 mongoose
   .connect(process.env.MONGODB_URI)
@@ -29,6 +38,10 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
+    },
+    avatarUrl: {
+      type: String,
+      default: "/img/defaultAvatar.webp",
     },
   },
   { timestamps: true }
@@ -64,7 +77,7 @@ userRouter.post("/signup", async (req, res) => {
     //saving the user in mongodb atlas.
     await user.save();
 
-    res.status(201).json({ msg: "Registered Successfully!" });
+    res.status(201).json({ msg: "Registered Successfully!", user });
   } catch (error) {
     console.log("Server Issues.Failed to create a new account", error);
 
@@ -109,6 +122,32 @@ userRouter.post("/logout", async (req, res) => {
     res.status(201).json({ msg: "LoggedOut Successfully!" });
   } catch (error) {
     console.log("Loggout failed", error);
+  }
+});
+//uploading file
+userRouter.post("/upload", async (req, res) => {
+  const file = req.files.file;
+  const { email } = req.body; // Extract email from formData
+
+  try {
+    const result = await cloudinary.v2.uploader.upload(file.tempFilePath, {
+      folder: "uploads",
+    });
+
+    const avatarUrl = result.secure_url;
+
+    const oldUser = await User.findOne({ email });
+    if (!oldUser) {
+      return res.status(404).json({ msg: "User not found." });
+    }
+
+    oldUser.avatarUrl = avatarUrl;
+    await oldUser.save();
+
+    res.status(201).json({ msg: "File uploaded successfully", avatarUrl });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ msg: "File upload failed" });
   }
 });
 
