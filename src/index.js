@@ -1,4 +1,3 @@
-//IMPORTING MODULES
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import bcrypt from "bcrypt";
@@ -7,27 +6,32 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import fileupload from "express-fileupload";
 import cloudinary from "cloudinary";
-//dotenv configuration:
-dotenv.config();
-//cloudinary configuration:
 
+// dotenv configuration:
+dotenv.config();
+
+// cloudinary configuration:
 cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-//creating exprtess app:
+
+// creating express app:
 const app = express();
-//Using middlewares:
+
+// Using middlewares:
 app.use(cors());
 app.use(express.json());
 app.use(fileupload({ useTempFiles: true }));
-//Connecting to database:
+
+// Connecting to database:
 mongoose
   .connect(process.env.MONGODB_URI)
-  .then(() => console.log("Succesfully connected to DB"))
-  .catch(() => console.log("DB connection got failed!"));
-//Creating mongoose userSchema:
+  .then(() => console.log("Successfully connected to DB"))
+  .catch(() => console.log("DB connection failed!"));
+
+// Creating mongoose userSchema:
 const userSchema = new mongoose.Schema(
   {
     userName: {
@@ -35,6 +39,7 @@ const userSchema = new mongoose.Schema(
     },
     email: {
       type: String,
+      unique: true, // Ensure unique email
     },
     password: {
       type: String,
@@ -46,82 +51,91 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-//Hashing password before saving it ton database:
+
+// Hashing password before saving it to database:
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) {
     return next();
   }
   try {
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
+    this.password = await bcrypt.hash(this.password, 10);
     next();
   } catch (error) {
     next(error);
   }
 });
-//creating user model:
+
+// Creating user model:
 const User = mongoose.model("User", userSchema);
-//Creating user router:
+
+// Creating user router:
 const userRouter = express.Router();
-//Creating sign up route:
+
+// Creating sign up route:
 userRouter.post("/signup", async (req, res) => {
   const { userName, email, password } = req.body;
-  //Checking wether user exist or not.
-  const userExist = await User.findOne({ email });
-  if (userExist) {
-    return res.status(201).json({ msg: "User already exist." });
-  }
-  //creating a new user:
   try {
-    const user = await new User({ userName, email, password });
-    //saving the user in mongodb atlas.
+    // Checking whether user exists or not.
+    const userExist = await User.findOne({ email });
+    if (userExist) {
+      return res.status(201).json({ msg: "User already exists." });
+    }
+    // Creating a new user:
+    const user = new User({ userName, email, password });
     await user.save();
-
-    res.status(201).json({ msg: "Registered Successfully!", user });
+    res.status(201).json({ msg: "Registered successfully!" });
   } catch (error) {
-    console.log("Server Issues.Failed to create a new account", error);
-
-    res
-      .status(500)
-      .json({ msg: "Server issues!Failed to create a new account" });
+    console.log("Server Issues.", error);
+    res.status(500).json({ msg: "Server issues!" });
   }
 });
 
-//login an user:
+// Login a user:
 userRouter.post("/login", async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  console.log(user);
-
-  if (!user) {
-    return res.status(201).json({ msg: "User doesn't exist." });
-  }
-  //checking the password:
-  const isMatch = await bcrypt.compare(password, user.password);
-  if (!isMatch) {
-    return res.status(201).json({ msg: "Invalid email or password." });
-  }
   try {
-    //Creating a jwt token:
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(201).json({ msg: "User does not exist." });
+    }
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(201).json({ msg: "Invalid email or password." });
+    }
     const token = jwt.sign(
       { id: user._id, email: user.email },
       process.env.JWT_TOKEN,
       { expiresIn: "10d" }
     );
-    //sending this token to front end:
 
-    res.status(201).json({ msg: "Logged in successfully", token });
+    res.status(201).json({ msg: "Logged in successfully", token, user });
   } catch (error) {
-    res.status(500).json({ msg: "server issues!loggin failed" });
+    console.error("Login failed:", error);
+    res.status(500).json({ msg: "Server error." });
   }
 });
 
-//creating logout rout:
-userRouter.post("/logout", async (req, res) => {
+// Changing user password:
+userRouter.post("/changepassword", async (req, res) => {
   try {
-    res.status(201).json({ msg: "LoggedOut Successfully!" });
+    const { currentPassword, newPassword, confirmPassword, email } = req.body;
+    if (newPassword !== confirmPassword) {
+      return res.status(201).json({ msg: "Passwords do not match!" });
+    }
+    const user = await User.findOne({ email });
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(201).json({ msg: "Incorrect current password!" });
+    }
+    //const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+    user.password = newPassword;
+    await user.save();
+    res.status(200).json({ msg: "Password changed successfully!", user });
   } catch (error) {
-    console.log("Loggout failed", error);
+    console.error("Something went wrong:", error);
+    res.status(500).json({ msg: "Server error" });
   }
 });
 //uploading file
@@ -151,11 +165,13 @@ userRouter.post("/upload", async (req, res) => {
   }
 });
 
-//Creating the user route:
+// Creating the user route:
 app.use("/api/user", userRouter);
-//creating port:
+
+// Creating port:
 const port = process.env.PORT || 5000;
-//Listening the app:
+
+// Listening to the app:
 app.listen(port, () =>
   console.log(`Listening to port number:${port} successfully`)
 );
